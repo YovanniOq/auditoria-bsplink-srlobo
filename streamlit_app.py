@@ -1,15 +1,15 @@
 import streamlit as st
 import pandas as pd
 
+# 1. Configuración de Marca Sr Lobo
 st.set_page_config(page_title="Auditoría de Reembolsos", layout="wide")
 
-# 1. Encabezado Profesional
 col1, col2 = st.columns([1, 3])
 with col1:
     try:
         st.image("logo_srlobo.png", width=200)
     except:
-        st.info("Sube 'logo_srlobo.png' a GitHub para ver el logo.")
+        st.info("Sube 'logo_srlobo.png' a GitHub")
 
 with col2:
     st.markdown("# Auditoría de Reembolsos")
@@ -17,52 +17,51 @@ with col2:
 
 st.divider()
 
-# 2. Carga de Datos
+# 2. Motor de Auditoría con Precisión Contable
 archivo = st.file_uploader("Cargar archivo ventas.xlsx", type=['xlsx'])
 
 if archivo:
     df = pd.read_excel(archivo)
     df.columns = [str(c).strip().upper() for c in df.columns]
     
-    # --- MOTOR DE AUDITORÍA ---
-    # Identificamos columnas (ajustar si los nombres en el Excel cambian)
-    TKT = 'DOCUMENT_NUMBER'
-    L8 = 'TASA L8'
-    TOTAL = 'TOTAL'
-    F_VTA = 'FECHA VENTA'
-    F_VUE = 'MARKETING_FLIGHT_DEPARTURE_DATE'
+    # Columnas clave
+    TKT, L8, TOTAL = 'DOCUMENT_NUMBER', 'TASA L8', 'TOTAL'
+    F_VTA, F_VUE = 'FECHA VENTA', 'MARKETING_FLIGHT_DEPARTURE_DATE'
 
-    # Convertir formatos
+    # Limpieza técnica
     df[F_VTA] = pd.to_datetime(df[F_VTA], errors='coerce')
     df[F_VUE] = pd.to_datetime(df[F_VUE], errors='coerce')
+    df[TOTAL] = pd.to_numeric(df[TOTAL], errors='coerce').fillna(0)
+    df[L8] = pd.to_numeric(df[L8], errors='coerce').fillna(0)
 
-    # Lógica de detección:
-    # Caso A: Tasa L8 (8.63 o 8.65 detectados)
-    es_l8 = df[L8].abs() > 0
-    
-    # Caso B: No-Show (Vendido después del vuelo y monto > 100)
-    es_noshow = (df[F_VTA] > df[F_VUE]) & (df[TOTAL].abs() > 100)
+    # Lógica de cálculo: No-Show vs Tasa L8
+    def calcular_auditoria(row):
+        # Caso 1: No-Show (Venta posterior al vuelo y monto significativo)
+        if (row[F_VTA] > row[F_VUE]) and abs(row[TOTAL]) > 100:
+            return abs(row[TOTAL]), "Penalidad No-Show (Tarifa Completa)"
+        # Caso 2: Tasa L8 (Solo reclamamos la diferencia de la tasa)
+        elif abs(row[L8]) > 0:
+            return abs(row[L8]), f"Diferencia Tasa L8 ({abs(row[L8])})"
+        return 0, None
 
-    # Creamos la columna de MOTIVO
-    df['MOTIVO_ADM'] = ""
-    df.loc[es_l8, 'MOTIVO_ADM'] = "Tasa L8 Pendiente"
-    df.loc[es_noshow, 'MOTIVO_ADM'] = "Penalidad No-Show"
-    df.loc[es_l8 & es_noshow, 'MOTIVO_ADM'] = "L8 + No-Show"
+    # Aplicamos el motor de cálculo
+    df[['MONTO_ADM', 'JUSTIFICACION']] = df.apply(lambda x: pd.Series(calcular_auditoria(x)), axis=1)
 
-    # Filtramos solo los 11 casos de interés
-    df_final = df[df['MOTIVO_ADM'] != ""].copy()
+    # Filtramos solo los 11 casos reales
+    df_adms = df[df['MONTO_ADM'] > 0].copy()
 
-    # 3. Métricas Visuales
+    # 3. Panel de Control (Dashboard)
     m1, m2, m3 = st.columns(3)
     m1.metric("Billetes Auditados", len(df))
-    m2.metric("Casos con ADM", len(df_final))
-    m3.metric("Total a Reclamar", f"{df_final[TOTAL].abs().sum():,.2f}")
+    m2.metric("Casos con ADM", len(df_adms))
+    m3.metric("Total Real a Reclamar", f"{df_adms['MONTO_ADM'].sum():,.2f}")
 
-    # 4. Tabla Detallada con el Motivo (Lo que faltaba)
-    st.subheader("Detalle de Billetes para Reclamar")
-    columnas_ver = [TKT, F_VTA, TOTAL, 'MOTIVO_ADM']
-    st.dataframe(df_final[columnas_ver], use_container_width=True, hide_index=True)
+    # 4. Tabla Detallada para World2fly
+    st.subheader("Desglose de Billetes para Reclamación")
+    st.dataframe(df_adms[[TKT, TOTAL, L8, 'MONTO_ADM', 'JUSTIFICACION']], 
+                 use_container_width=True, hide_index=True)
 
-    # Botón para descargar el reporte para Sergio
-    csv = df_final.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Descargar Reporte de Certificación", data=csv, file_name='Certificacion_SrLobo.csv')
+    # 5. Exportación Certificada
+    csv = df_adms.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Descargar Reporte de Certificación", data=csv, 
+                       file_name='Certificacion_Reclamos_SrLobo.csv', mime='text/csv')
