@@ -2,20 +2,20 @@ import streamlit as st
 import pandas as pd
 import os
 
-# 1. Configuración de Marca Eurekis
+# 1. Configuración de Marca y Página
 st.set_page_config(page_title="Auditoría Eurekis | Digitalized Finance", layout="wide")
 
-# Encabezado Simétrico (Ajustado para el logo de Eurekis)
+# Encabezado con Simetría (Ajuste de Pintura para Logo y Título)
 col1, col2 = st.columns([1, 4])
 with col1:
-    # Espaciado superior para alineación perfecta
-    st.markdown("<div style='padding-top: 20px;'>", unsafe_allow_html=True)
-    # Cambiamos la búsqueda al nuevo nombre del archivo: logo_eurekis.png
-    logo_path = "logo_eurekis.png" 
+    # Espaciado superior para que el logo no quede muy arriba
+    st.markdown("<div style='padding-top: 25px;'>", unsafe_allow_html=True)
+    # Buscamos el nuevo archivo logo_eurekis.png
+    logo_path = "logo_eurekis.png"
     if os.path.exists(logo_path):
         st.image(logo_path, width=200)
     else:
-        # Intento de respaldo con URL (asegúrate de que el nombre coincida en GitHub)
+        # Respaldo: Intento cargar desde la URL del repositorio
         st.image("https://raw.githubusercontent.com/YovanniOq/auditoria-bsplink-srlobo/main/logo_eurekis.png", width=200)
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -25,7 +25,7 @@ with col2:
 
 st.divider()
 
-# 2. Lógica de Carga de Datos
+# 2. Lógica de Carga de Datos (Nube o Local)
 @st.cache_data
 def cargar_datos(source):
     try:
@@ -33,26 +33,31 @@ def cargar_datos(source):
         data.columns = [str(c).strip().upper() for c in data.columns]
         if 'FECHA VENTA' in data.columns:
             data['FECHA VENTA'] = pd.to_datetime(data['FECHA VENTA'], errors='coerce')
+            # Extraer el nombre del mes para el filtro
             data['MES_NOMBRE'] = data['FECHA VENTA'].dt.month_name()
         return data
     except:
         return None
 
+# Intentar primero la nube
 url_nube = "https://raw.githubusercontent.com/YovanniOq/auditoria-bsplink-srlobo/main/ventas.xlsx"
 df_raw = cargar_datos(url_nube)
 
+# Si falla la nube, habilitar carga manual
 if df_raw is None:
-    st.warning("⚠️ Conexión con ventas.xlsx pendiente en la nube. Carga manual disponible:")
-    archivo_manual = st.file_uploader("Cargar archivo de ventas", type=['xlsx'])
+    st.warning("⚠️ Conexión automática pendiente. Por favor, carga el archivo manualmente:")
+    archivo_manual = st.file_uploader("Cargar ventas.xlsx", type=['xlsx'])
     if archivo_manual:
         df_raw = cargar_datos(archivo_manual)
 
-# 3. Procesamiento y Filtros por Mes
+# 3. Procesamiento y Filtros
 if df_raw is not None:
+    # Filtro de Mes en la barra lateral
     st.sidebar.header("Filtros de Auditoría")
-    meses = df_raw['MES_NOMBRE'].dropna().unique().tolist()
-    filtro_mes = st.sidebar.multiselect("Seleccionar Meses:", options=meses, default=meses)
+    meses_disponibles = df_raw['MES_NOMBRE'].dropna().unique().tolist()
+    filtro_mes = st.sidebar.multiselect("Seleccionar Meses:", options=meses_disponibles, default=meses_disponibles)
     
+    # Filtrar datos según la selección
     df = df_raw[df_raw['MES_NOMBRE'].isin(filtro_mes)].copy()
 
     # Motor de Auditoría
@@ -78,8 +83,8 @@ if df_raw is not None:
     monto_recuperado = df_adms['MONTO_ADM'].sum()
     porcentaje_recuperacion = (monto_recuperado / monto_total_auditado * 100) if monto_total_auditado > 0 else 0
 
-    # 4. Dashboard Ejecutivo (4 métricas)
-    st.subheader(f"📊 Certificación de Recuperación: {', '.join(filtro_mes)}")
+    # 4. Dashboard de Métricas (4 KPIs)
+    st.subheader(f"📊 Resumen de Certificación: {', '.join(filtro_mes)}")
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Billetes Auditados", f"{len(df)}")
     m2.metric("Casos con ADM", f"{len(df_adms)}")
@@ -90,5 +95,6 @@ if df_raw is not None:
     st.dataframe(df_adms[[TKT, TOTAL, L8, 'MONTO_ADM', 'MOTIVO', 'MES_NOMBRE']], 
                  use_container_width=True, hide_index=True)
     
+    # Botón de descarga
     csv = df_adms.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Descargar Reporte Eurekis", data=csv, file_name='Auditoria_Eurekis_W2fly.csv')
+    st.download_button("📥 Descargar Reporte Eurekis", data=csv, file_name='Auditoria_Eurekis.csv')
