@@ -6,8 +6,8 @@ import os
 # 1. Configuración de Marca y Página
 st.set_page_config(page_title="Auditoría Eurekis | Digitalized Finance", layout="wide")
 
-# Función para cargar imagen local y evitar errores de URL
-def get_base64_of_bin_file(bin_file):
+# Función para inyectar el logo directamente al código
+def get_base64(bin_file):
     with open(bin_file, 'rb') as f:
         data = f.read()
     return base64.b64encode(data).decode()
@@ -16,18 +16,18 @@ def get_base64_of_bin_file(bin_file):
 col1, col2 = st.columns([1, 4])
 
 with col1:
-    # Intentamos cargar el logo de Eurekis
-    logo_file = "logo_eurekis.png"
+    # Usamos el nombre exacto que me indicaste: Logo.png
+    logo_file = "Logo.png"
     if os.path.exists(logo_file):
-        # Si el archivo existe, lo inyectamos directamente
-        encoded_logo = get_base64_of_bin_file(logo_file)
+        encoded_logo = get_base64(logo_file)
+        # Inyectamos el logo alineado al título
         st.markdown(
-            f'<img src="data:image/png;base64,{encoded_logo}" width="200" style="padding-top: 10px;">',
+            f'<img src="data:image/png;base64,{encoded_logo}" width="200" style="padding-top: 15px;">',
             unsafe_allow_html=True
         )
     else:
-        # Respaldo: Si no lo encuentra, te avisa pero no rompe el diseño
-        st.image("https://raw.githubusercontent.com/YovanniOq/auditoria-bsplink-srlobo/main/logo_eurekis.png", width=200)
+        # Si no lo encuentra local, intenta el respaldo de GitHub
+        st.image("https://raw.githubusercontent.com/YovanniOq/auditoria-bsplink-srlobo/main/Logo.png", width=200)
 
 with col2:
     st.markdown("<h1 style='margin-bottom: 0;'>Auditoría de Reembolsos</h1>", unsafe_allow_html=True)
@@ -35,7 +35,7 @@ with col2:
 
 st.divider()
 
-# 2. Lógica de Carga de Datos (Histórico)
+# 2. Motor de Carga Histórica (Enero + Febrero)
 @st.cache_data
 def cargar_datos_nube():
     url_ventas = "https://raw.githubusercontent.com/YovanniOq/auditoria-bsplink-srlobo/main/ventas.xlsx"
@@ -44,6 +44,7 @@ def cargar_datos_nube():
         data.columns = [str(c).strip().upper() for c in data.columns]
         if 'FECHA VENTA' in data.columns:
             data['FECHA VENTA'] = pd.to_datetime(data['FECHA VENTA'], errors='coerce')
+            # Extraer el nombre del mes para el filtro
             data['MES_NOMBRE'] = data['FECHA VENTA'].dt.month_name()
         return data
     except:
@@ -51,15 +52,8 @@ def cargar_datos_nube():
 
 df_raw = cargar_datos_nube()
 
-if df_raw is None:
-    st.warning("⚠️ No se detectó 'ventas.xlsx' en la nube. Carga manual disponible:")
-    archivo_manual = st.file_uploader("Subir ventas.xlsx", type=['xlsx'])
-    if archivo_manual:
-        df_raw = pd.read_excel(archivo_manual)
-        df_raw.columns = [str(c).strip().upper() for c in df_raw.columns]
-
-# 3. Procesamiento y Filtros (Enero + Febrero)
 if df_raw is not None:
+    # Filtros laterales
     st.sidebar.header("Filtros de Auditoría")
     meses_disponibles = df_raw['MES_NOMBRE'].dropna().unique().tolist()
     filtro_mes = st.sidebar.multiselect("Seleccionar Período:", options=meses_disponibles, default=meses_disponibles)
@@ -84,7 +78,7 @@ if df_raw is not None:
     df[['MONTO_ADM', 'MOTIVO']] = df.apply(lambda x: pd.Series(auditar(x)), axis=1)
     df_adms = df[df['MONTO_ADM'] > 0].copy()
 
-    # Cálculo de KPIs
+    # Cálculo de KPIs (Incluyendo el % que pediste)
     total_auditado = df[TOTAL].abs().sum()
     total_recuperar = df_adms['MONTO_ADM'].sum()
     porcentaje = (total_recuperar / total_auditado * 100) if total_auditado > 0 else 0
@@ -103,3 +97,5 @@ if df_raw is not None:
     
     csv = df_adms.to_csv(index=False).encode('utf-8')
     st.download_button("📥 Descargar Reporte Eurekis", data=csv, file_name='Auditoria_Eurekis.csv')
+else:
+    st.error("⚠️ No se pudo cargar ventas.xlsx desde la nube. Revisa el nombre del archivo en GitHub.")
