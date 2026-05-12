@@ -1,55 +1,91 @@
-import streamlit as st
 import os
 import zipfile
 import pandas as pd
+import re
 
-st.set_page_config(page_title="Auditoría Sr Lobo", layout="wide")
-st.title("📊 Auditoría de Reembolsos - Eurekis")
-
+# --- CONFIGURACIÓN ---
 PATH_BASE = r'C:\Auditoria_Eurekis'
 CARPETAS = ['Data_Ventas_2025', 'Data_Ventas_2026']
 
-if st.button('🚀 EJECUTAR AUDITORÍA COMPLETA'):
+def limpiar_tkt(txt):
+    return re.sub(r'\D', '', str(txt)).lstrip('0')[-10:]
+
+def parse_monto_iata(val):
+    if not val or val.strip() == "": return 0.0
+    mapping = {'{':0,'A':1,'B':2,'C':3,'D':4,'E':5,'F':6,'G':7,'H':8,'I':9,
+               '}':0,'J':1,'K':2,'L':3,'M':4,'N':5,'O':6,'P':7,'Q':8,'R':9}
+    val = val.strip()
+    last_char = val[-1] if val else ""
+    if last_char in mapping:
+        digit = mapping[last_char]
+        sign = -1 if last_char in '}JKLMNOPQR' else 1
+        return sign * (int(val[:-1]) * 10 + digit) / 100.0
+    return float(val) / 100.0 if str(val).isdigit() else 0.0
+
+def ejecutar_auditoria():
+    print("🚀 Iniciando Auditoría Integral Sr Lobo / Eurekis...")
     reembolsos_totales = []
-    infracciones_cupon2 = []
-    
+    infracciones_cupones = []
+
     for carpeta in CARPETAS:
-        ruta = os.path.join(PATH_BASE, carpeta)
-        if not os.path.exists(ruta): continue
+        ruta_full = os.path.join(PATH_BASE, carpeta)
+        if not os.path.exists(ruta_full):
+            print(f"⚠️ Saltando: {carpeta} (No encontrada)")
+            continue
         
-        st.write(f"Analizando: {carpeta}...")
-        archivos = [f for f in os.listdir(ruta) if f.lower().endswith('.zip')]
+        print(f"📂 Procesando {carpeta}...")
+        archivos = [f for f in os.listdir(ruta_full) if f.lower().endswith('.zip')]
         
         for file in archivos:
             try:
-                with zipfile.ZipFile(os.path.join(ruta, file), 'r') as z:
+                with zipfile.ZipFile(os.path.join(ruta_full, file), 'r') as z:
                     for name in z.namelist():
                         with z.open(name) as f:
-                            lines = f.read().decode('latin-1', errors='ignore').splitlines()
-                            t_info, t_cpns = {}, {}
-                            for l in lines:
+                            content = f.read().decode('latin-1', errors='ignore').splitlines()
+                            t_info = {}
+                            t_cpns = {}
+                            
+                            for l in content:
                                 if l.startswith('BKS') and 'RFND' in l:
-                                    t = l[24:37].strip()[-10:]
-                                    t_info[t] = {'Agencia': l[37:44].strip(), 'Monto': l[50:61].strip(), 'Fecha': l[11:17]}
+                                    t = limpiar_tkt(l[24:37])
+                                    t_info[t] = {
+                                        'Ticket': t,
+                                        'Agencia': l[37:44].strip(),
+                                        'Monto': parse_monto_iata(l[50:61]),
+                                        'Fecha': l[11:17],
+                                        'RTDN': limpiar_tkt(l[44:58])
+                                    }
                                     t_cpns[t] = set()
-                                if l.startswith('BAR'):
-                                    tb = l[24:37].strip()[-10:]
-                                    cp = l[37:38].strip()
-                                    if tb in t_cpns and cp.isdigit(): t_cpns[tb].add(int(cp))
 
+                                if l.startswith('BAR'):
+                                    tb = limpiar_tkt(l[24:37])
+                                    cp = l[37:38].strip()
+                                    if tb in t_cpns and cp.isdigit():
+                                        t_cpns[tb].add(int(cp))
+
+                            # Aplicar Reglas
                             for tk, cn in t_cpns.items():
                                 if tk not in t_info: continue
-                                # Regla 1: Auditoría que ya teníamos avanzada
-                                if cn == {1, 2, 3, 4} or len(cn) == 0:
-                                    reembolsos_totales.append({'Ticket': tk, 'Agencia': t_info[tk]['Agencia'], 'Monto': t_info[tk]['Monto'], 'Fecha': t_info[tk]['Fecha']})
-                                # Regla 2: Adicional de Cupón 2
-                                elif 1 not in cn and 2 in cn:
-                                    infracciones_cupon2.append({'Ticket': tk, 'Agencia': t_info[tk]['Agencia'], 'Monto': t_info[tk]['Monto'], 'Cupones': sorted(list(cn))})
-            except: continue
+                                reg = t_info[tk]
+                                
+                                # Infracción Sergio: Tramo 2 reembolsado sin Tramo 1
+                                if 1 not in cn and 2 in cn:
+                                    infracciones_cupones.append({**reg, 'Error': 'Tramo 2 devuelto con T1 volado'})
+                                else:
+                                    reembolsos_totales.append(reg)
+            except Exception as e:
+                print(f"❌ Error en {file}: {e}")
 
-    st.success("✅ ¡Proceso Terminado!")
-    st.subheader(f"🏆 Auditoría Principal: {len(reembolsos_totales)} registros encontrados")
-    st.dataframe(pd.DataFrame(reembolsos_totales).drop_duplicates())
-    
-    st.subheader(f"⚠️ Infracciones Cupón 2: {len(infracciones_cupon2)} casos detectados")
-    st.dataframe(pd.DataFrame(infracciones_cupon2).drop_duplicates())
+    # Exportar resultados
+    if reembolsos_totales or infracciones_cupones:
+        pd.DataFrame(reembolsos_totales).drop_duplicates().to_csv(r'C:\Auditoria_Eurekis\REEMBOLSOS_GENERALES.csv', index=False)
+        pd.DataFrame(infracciones_cupones).drop_duplicates().to_csv(r'C:\Auditoria_Eurekis\INFRACCIONES_CUPONES.csv', index=False)
+        print(f"\n✅ AUDITORÍA FINALIZADA")
+        print(f"📊 Reembolsos encontrados: {len(reembolsos_totales)}")
+        print(f"⚠️ Infracciones de cupones: {len(infracciones_cupones)}")
+        print("📁 Archivos generados en C:\\Auditoria_Eurekis")
+    else:
+        print("❌ No se encontraron datos para procesar.")
+
+if __name__ == "__main__":
+    ejecutar_auditoria()
