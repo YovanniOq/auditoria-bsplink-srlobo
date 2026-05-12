@@ -3,9 +3,8 @@ import zipfile
 import pandas as pd
 import re
 
-# --- CONFIGURACIÓN ---
-PATH_BASE = r'C:\Auditoria_Eurekis'
-CARPETAS = ['Data_Ventas_2025', 'Data_Ventas_2026']
+# --- CONFIGURACIÓN DE RUTAS (CORREGIDO SEGÚN TU IMAGEN) ---
+CARPETAS = [r'C:\Data_Ventas_2025', r'C:\Data_Ventas_2026']
 
 def limpiar_tkt(txt):
     return re.sub(r'\D', '', str(txt)).lstrip('0')[-10:]
@@ -23,17 +22,16 @@ def parse_monto_iata(val):
     return float(val) / 100.0 if str(val).isdigit() else 0.0
 
 def ejecutar_auditoria():
-    print("🚀 Iniciando Auditoría Integral Sr Lobo / Eurekis...")
+    print("🚀 Iniciando Auditoría Integral - Sr Lobo / Eurekis")
     reembolsos_totales = []
     infracciones_cupones = []
 
-    for carpeta in CARPETAS:
-        ruta_full = os.path.join(PATH_BASE, carpeta)
+    for ruta_full in CARPETAS:
         if not os.path.exists(ruta_full):
-            print(f"⚠️ Saltando: {carpeta} (No encontrada)")
+            print(f"⚠️ Carpeta no encontrada: {ruta_full}")
             continue
         
-        print(f"📂 Procesando {carpeta}...")
+        print(f"📂 Procesando: {ruta_full}")
         archivos = [f for f in os.listdir(ruta_full) if f.lower().endswith('.zip')]
         
         for file in archivos:
@@ -46,6 +44,7 @@ def ejecutar_auditoria():
                             t_cpns = {}
                             
                             for l in content:
+                                # Registro BKS: Datos de Reembolso
                                 if l.startswith('BKS') and 'RFND' in l:
                                     t = limpiar_tkt(l[24:37])
                                     t_info[t] = {
@@ -53,39 +52,41 @@ def ejecutar_auditoria():
                                         'Agencia': l[37:44].strip(),
                                         'Monto': parse_monto_iata(l[50:61]),
                                         'Fecha': l[11:17],
-                                        'RTDN': limpiar_tkt(l[44:58])
+                                        'Archivo': file
                                     }
                                     t_cpns[t] = set()
 
+                                # Registro BAR: Cupones
                                 if l.startswith('BAR'):
                                     tb = limpiar_tkt(l[24:37])
                                     cp = l[37:38].strip()
                                     if tb in t_cpns and cp.isdigit():
                                         t_cpns[tb].add(int(cp))
 
-                            # Aplicar Reglas
                             for tk, cn in t_cpns.items():
                                 if tk not in t_info: continue
                                 reg = t_info[tk]
-                                
-                                # Infracción Sergio: Tramo 2 reembolsado sin Tramo 1
+                                # Regla Sergio: Tramo 2 reembolsado con Tramo 1 volado (no aparece en el reembolso)
                                 if 1 not in cn and 2 in cn:
-                                    infracciones_cupones.append({**reg, 'Error': 'Tramo 2 devuelto con T1 volado'})
+                                    infracciones_cupones.append({**reg, 'Error': 'T2 reembolsado con T1 usado'})
                                 else:
                                     reembolsos_totales.append(reg)
             except Exception as e:
                 print(f"❌ Error en {file}: {e}")
 
-    # Exportar resultados
+    # Guardar Resultados en C:\ para fácil acceso
     if reembolsos_totales or infracciones_cupones:
-        pd.DataFrame(reembolsos_totales).drop_duplicates().to_csv(r'C:\Auditoria_Eurekis\REEMBOLSOS_GENERALES.csv', index=False)
-        pd.DataFrame(infracciones_cupones).drop_duplicates().to_csv(r'C:\Auditoria_Eurekis\INFRACCIONES_CUPONES.csv', index=False)
-        print(f"\n✅ AUDITORÍA FINALIZADA")
-        print(f"📊 Reembolsos encontrados: {len(reembolsos_totales)}")
-        print(f"⚠️ Infracciones de cupones: {len(infracciones_cupones)}")
-        print("📁 Archivos generados en C:\\Auditoria_Eurekis")
+        if reembolsos_totales:
+            pd.DataFrame(reembolsos_totales).drop_duplicates().to_csv(r'C:\REEMBOLSOS_GENERALES.csv', index=False)
+        if infracciones_cupones:
+            pd.DataFrame(infracciones_cupones).drop_duplicates().to_csv(r'C:\INFRACCIONES_CUPONES.csv', index=False)
+        
+        print(f"\n✅ PROCESO COMPLETADO")
+        print(f"📊 Reembolsos: {len(reembolsos_totales)}")
+        print(f"⚠️ Infracciones: {len(infracciones_cupones)}")
+        print("📁 Revisa tus archivos en la raíz de C:\\")
     else:
-        print("❌ No se encontraron datos para procesar.")
+        print("❌ No se encontraron datos en las carpetas indicadas.")
 
 if __name__ == "__main__":
     ejecutar_auditoria()
