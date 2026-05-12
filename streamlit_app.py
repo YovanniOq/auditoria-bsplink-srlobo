@@ -4,11 +4,9 @@ import zipfile
 import pandas as pd
 import re
 
-# Configuración de la página
 st.set_page_config(page_title="Auditoría Sr Lobo BPO", layout="wide")
 st.title("📊 Sistema de Auditoría de Reembolsos - Eurekis")
 
-# Rutas
 PATH_BASE = r'C:\Auditoria_Eurekis'
 CARPETAS = ['Data_Ventas_2025', 'Data_Ventas_2026']
 
@@ -19,8 +17,7 @@ def parse_monto(val):
     if not val or val.strip() == "": return 0.0
     mapping = {'{':0,'A':1,'B':2,'C':3,'D':4,'E':5,'F':6,'G':7,'H':8,'I':9,'}':0,'J':1,'K':2,'L':3,'M':4,'N':5,'O':6,'P':7,'Q':8,'R':9}
     val = val.strip()
-    if not val: return 0.0
-    last_char = val[-1]
+    last_char = val[-1] if val else ""
     if last_char in mapping:
         digit = mapping[last_char]
         sign = -1 if last_char in '}JKLMNOPQR' else 1
@@ -37,7 +34,6 @@ if st.button('🚀 Disparar Auditoría Integral'):
     for i, carpeta in enumerate(CARPETAS):
         ruta_full = os.path.join(PATH_BASE, carpeta)
         if not os.path.exists(ruta_full):
-            st.warning(f"Carpeta no encontrada: {carpeta}")
             continue
         
         status_text.text(f"Analizando {carpeta}...")
@@ -63,30 +59,23 @@ if st.button('🚀 Disparar Auditoría Integral'):
                             for tk, cn in t_cpns.items():
                                 if tk not in t_info: continue
                                 info = t_info[tk]
-                                # RECUPERACIÓN DE LO AVANZADO (TOTALES)
                                 if cn == {1, 2, 3, 4} or (info['RTDN'] == tk):
                                     reembolsos_totales.append({'Ticket': tk, 'Agencia': info['Agencia'], 'Monto': info['Monto'], 'Fecha': info['Fecha']})
-                                # ADICIONAL (CUPÓN 2)
                                 elif 1 not in cn and 2 in cn:
-                                    infracciones_cupon2.append({'Ticket': tk, 'Agencia': info['Agencia'], 'Cupones': sorted(list(cn)), 'Monto': info['Monto']})
+                                    infracciones_cupon2.append({'Ticket': tk, 'Agencia': info['Agencia'], 'Cupones': str(sorted(list(cn))), 'Monto': info['Monto']})
             except: continue
         progreso.progress((i + 1) / len(CARPETAS))
 
-    status_text.text("✅ Proceso completado.")
-
-    # Mostrar resultados en Streamlit
-    col1, col2 = st.columns(2)
+    st.success("✅ ¡Auditoría completada!")
     
-    with col1:
-        st.header("🏆 Auditoría Principal")
-        df_t = pd.DataFrame(reembolsos_totales).drop_duplicates()
-        st.metric("Total Reembolsos", len(df_t))
-        st.dataframe(df_t)
-        st.download_button("Descargar Totales", df_t.to_csv(index=False), "Auditoria_TOTALES.csv")
-
-    with col2:
-        st.header("⚠️ Adicional Cupón 2")
-        df_i = pd.DataFrame(infracciones_cupon2).drop_duplicates()
-        st.metric("Infracciones Detectadas", len(df_i))
-        st.dataframe(df_i)
-        st.download_button("Descargar Infracciones", df_i.to_csv(index=False), "Infracciones_CUPON2.csv")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("🏆 Totales")
+        df1 = pd.DataFrame(reembolsos_totales).drop_duplicates()
+        st.write(f"Encontrados: {len(df1)}")
+        st.dataframe(df1)
+    with c2:
+        st.subheader("⚠️ Cupón 2")
+        df2 = pd.DataFrame(infracciones_cupon2).drop_duplicates()
+        st.write(f"Encontrados: {len(df2)}")
+        st.dataframe(df2)
