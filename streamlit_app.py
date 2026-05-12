@@ -3,7 +3,8 @@ import zipfile
 import pandas as pd
 import re
 
-# --- CONFIGURACIÓN DE RUTAS (CORREGIDO SEGÚN TU IMAGEN) ---
+# --- CONFIGURACIÓN DE RUTAS ---
+# Basado en tu imagen, están en la raíz de C:
 CARPETAS = [r'C:\Data_Ventas_2025', r'C:\Data_Ventas_2026']
 
 def limpiar_tkt(txt):
@@ -21,30 +22,29 @@ def parse_monto_iata(val):
         return sign * (int(val[:-1]) * 10 + digit) / 100.0
     return float(val) / 100.0 if str(val).isdigit() else 0.0
 
-def ejecutar_auditoria():
-    print("🚀 Iniciando Auditoría Integral - Sr Lobo / Eurekis")
-    reembolsos_totales = []
-    infracciones_cupones = []
+def ejecutar_motor():
+    print("🚀 Ejecutando Motor de Auditoría Integral...")
+    totales = []
+    infracciones = []
 
-    for ruta_full in CARPETAS:
-        if not os.path.exists(ruta_full):
-            print(f"⚠️ Carpeta no encontrada: {ruta_full}")
+    for ruta in CARPETAS:
+        if not os.path.exists(ruta):
+            print(f"⚠️ Carpeta no encontrada: {ruta}")
             continue
         
-        print(f"📂 Procesando: {ruta_full}")
-        archivos = [f for f in os.listdir(ruta_full) if f.lower().endswith('.zip')]
+        print(f"📂 Analizando: {ruta}")
+        archivos_zip = [f for f in os.listdir(ruta) if f.lower().endswith('.zip')]
         
-        for file in archivos:
+        for zip_name in archivos_zip:
             try:
-                with zipfile.ZipFile(os.path.join(ruta_full, file), 'r') as z:
-                    for name in z.namelist():
-                        with z.open(name) as f:
-                            content = f.read().decode('latin-1', errors='ignore').splitlines()
-                            t_info = {}
-                            t_cpns = {}
+                with zipfile.ZipFile(os.path.join(ruta, zip_name), 'r') as z:
+                    for hot_file in z.namelist():
+                        with z.open(hot_file) as f:
+                            lines = f.read().decode('latin-1', errors='ignore').splitlines()
+                            t_info, t_cpns = {}, {}
                             
-                            for l in content:
-                                # Registro BKS: Datos de Reembolso
+                            for l in lines:
+                                # Registro de Reembolso (BKS)
                                 if l.startswith('BKS') and 'RFND' in l:
                                     t = limpiar_tkt(l[24:37])
                                     t_info[t] = {
@@ -52,41 +52,41 @@ def ejecutar_auditoria():
                                         'Agencia': l[37:44].strip(),
                                         'Monto': parse_monto_iata(l[50:61]),
                                         'Fecha': l[11:17],
-                                        'Archivo': file
+                                        'Archivo': zip_name
                                     }
                                     t_cpns[t] = set()
 
-                                # Registro BAR: Cupones
+                                # Registro de Cupones (BAR)
                                 if l.startswith('BAR'):
                                     tb = limpiar_tkt(l[24:37])
                                     cp = l[37:38].strip()
                                     if tb in t_cpns and cp.isdigit():
                                         t_cpns[tb].add(int(cp))
-
+                            
+                            # Aplicar Reglas de Negocio
                             for tk, cn in t_cpns.items():
-                                if tk not in t_info: continue
-                                reg = t_info[tk]
-                                # Regla Sergio: Tramo 2 reembolsado con Tramo 1 volado (no aparece en el reembolso)
-                                if 1 not in cn and 2 in cn:
-                                    infracciones_cupones.append({**reg, 'Error': 'T2 reembolsado con T1 usado'})
-                                else:
-                                    reembolsos_totales.append(reg)
-            except Exception as e:
-                print(f"❌ Error en {file}: {e}")
+                                if tk in t_info:
+                                    # REGLA SERGIO: Cupón 2 devuelto sin el 1 (Infracción)
+                                    if 1 not in cn and 2 in cn:
+                                        infracciones.append({**t_info[tk], 'Error': 'Cupón 2 devuelto sin Cupón 1'})
+                                    else:
+                                        totales.append(t_info[tk])
+            except:
+                continue
 
-    # Guardar Resultados en C:\ para fácil acceso
-    if reembolsos_totales or infracciones_cupones:
-        if reembolsos_totales:
-            pd.DataFrame(reembolsos_totales).drop_duplicates().to_csv(r'C:\REEMBOLSOS_GENERALES.csv', index=False)
-        if infracciones_cupones:
-            pd.DataFrame(infracciones_cupones).drop_duplicates().to_csv(r'C:\INFRACCIONES_CUPONES.csv', index=False)
+    # Guardar resultados en C:\ para que los encuentres rápido
+    if totales or infracciones:
+        if totales:
+            pd.DataFrame(totales).drop_duplicates().to_csv(r'C:\REEMBOLSOS_GENERALES.csv', index=False)
+        if infracciones:
+            pd.DataFrame(infracciones).drop_duplicates().to_csv(r'C:\INFRACCIONES_CUPONES.csv', index=False)
         
-        print(f"\n✅ PROCESO COMPLETADO")
-        print(f"📊 Reembolsos: {len(reembolsos_totales)}")
-        print(f"⚠️ Infracciones: {len(infracciones_cupones)}")
-        print("📁 Revisa tus archivos en la raíz de C:\\")
+        print(f"\n✅ PROCESO FINALIZADO")
+        print(f"📊 Reembolsos Totales: {len(totales)}")
+        print(f"⚠️ Infracciones Cupones: {len(infracciones)}")
+        print("📁 Reportes generados en C:\\")
     else:
-        print("❌ No se encontraron datos en las carpetas indicadas.")
+        print("❌ No se detectó información de reembolsos.")
 
 if __name__ == "__main__":
-    ejecutar_auditoria()
+    ejecutar_motor()
