@@ -3,10 +3,8 @@ import zipfile
 import pandas as pd
 import re
 
-# RUTA MAESTRA EN C:
+# RUTAS BASADAS EN TUS GUIONES BAJOS
 PATH_BASE = r'C:\Auditoria_Eurekis'
-
-# AJUSTADO CON GUIONES BAJOS SEGÚN TU CONFIRMACIÓN
 CARPETAS = ['Data_Ventas_2025', 'Data_Ventas_2026']
 
 def limpiar(txt):
@@ -24,18 +22,17 @@ def parse_monto(val):
         return sign * (int(val[:-1]) * 10 + digit) / 100.0
     return float(val) / 100.0 if str(val).isdigit() else 0.0
 
-print("--- INICIANDO MOTOR DE AUDITORÍA (SR LOBO - EUREKIS) ---")
+print("--- REINICIANDO MOTOR INTEGRAL (RECUPERANDO AUDITORÍA PRINCIPAL) ---")
 
-reembolsos_totales = []
-infracciones_cupon2 = []
+reembolsos_totales = []  # LA AUDITORÍA PRINCIPAL (485+ casos)
+infracciones_cupon2 = [] # EL ADICIONAL (Infracción de uso)
 
 for carpeta in CARPETAS:
     ruta_full = os.path.join(PATH_BASE, carpeta)
     if not os.path.exists(ruta_full):
-        print(f"!!! Error: No se pudo encontrar la carpeta '{carpeta}'")
         continue
     
-    print(f"Buscando en: {carpeta}...")
+    print(f"Escaneando datos en: {carpeta}...")
     for root, _, files in os.walk(ruta_full):
         for file in files:
             if file.lower().endswith('.zip'):
@@ -43,41 +40,57 @@ for carpeta in CARPETAS:
                     with zipfile.ZipFile(os.path.join(root, file), 'r') as z:
                         for name in z.namelist():
                             with z.open(name) as f:
-                                lines = f.read().decode('latin-1', errors='ignore').splitlines()
-                                t_info = {}
-                                t_cpns = {}
-                                for l in lines:
+                                lineas = f.read().decode('latin-1', errors='ignore').splitlines()
+                                t_info, t_cpns = {}, {}
+                                
+                                for l in lineas:
+                                    # Captura de datos básicos del reembolso
                                     if l.startswith('BKS') and 'RFND' in l:
                                         t = limpiar(l[24:37])
                                         r = limpiar(l[44:58])
                                         t_info[t] = {
                                             'RTDN': r, 'Agencia': l[37:44].strip(),
-                                            'Monto': parse_monto(l[50:61]), 'Fecha': l[11:17]
+                                            'Monto': parse_monto(l[50:61]), 'Fecha': l[11:17], 'ZIP': file
                                         }
                                         t_cpns[t] = set()
+                                    
+                                    # Captura de cupones para el análisis de uso
                                     if l.startswith('BAR'):
                                         tb = limpiar(l[24:37])
                                         cp = l[37:38].strip()
                                         if tb in t_cpns and cp.isdigit():
                                             t_cpns[tb].add(int(cp))
 
-                                for tk, cn in tkt_cpns.items():
+                                for tk, cn in t_cpns.items():
+                                    if tk not in t_info: continue
                                     info = t_info[tk]
-                                    # Filtro de Reembolsos Totales
-                                    if cn == {1, 2, 3, 4} or (info['RTDN'] == tk and len(cn) == 0):
-                                        reembolsos_totales.append({'Ticket': tk, 'Agencia': info['Agencia'], 'Monto': info['Monto'], 'Fecha': info['Fecha']})
-                                    # Filtro de Infracción Cupón 2 (Ida volada, vuelta reembolsada)
-                                    elif 1 not in cn and 2 in cn:
-                                        infracciones_cupon2.append({'Ticket': tk, 'Agencia': info['Agencia'], 'Cupones': sorted(list(cn)), 'Monto_Fuga': info['Monto'], 'Motivo': 'ADM: Cupón 2 RFND con Cupón 1 Volado'})
-                except Exception as e:
-                    print(f"Error procesando {file}: {e}")
+                                    
+                                    # 1. AUDITORÍA PRINCIPAL: Reembolsos Totales (1-2-3-4 o Directos)
+                                    # Aquí es donde recuperamos tus 485 casos
+                                    if cn == {1, 2, 3, 4} or (info['RTDN'] == tk):
+                                        reembolsos_totales.append({
+                                            'Ticket': tk, 'Agencia': info['Agencia'], 
+                                            'Monto': info['Monto'], 'Fecha': info['Fecha'], 'Archivo': info['ZIP']
+                                        })
+                                    
+                                    # 2. AUDITORÍA ADICIONAL: Solo si NO incluye el cupón 1
+                                    elif 1 not in cn and len(cn) > 0:
+                                        infracciones_cupon2.append({
+                                            'Ticket': tk, 'Agencia': info['Agencia'], 
+                                            'Cupones': sorted(list(cn)), 'Monto': info['Monto'],
+                                            'Motivo': 'ADM: Posible Cupón 1 ya volado'
+                                        })
+                except: continue
 
-# CREACIÓN DE REPORTES FINALES
+# EXPORTACIÓN DE RESULTADOS
 if reembolsos_totales:
-    pd.DataFrame(reembolsos_totales).to_csv(os.path.join(PATH_BASE, '1_Reembolsos_Totales.csv'), index=False)
-if infracciones_cupon2:
-    pd.DataFrame(infracciones_cupon2).to_csv(os.path.join(PATH_BASE, '2_Infracciones_Cupón2.csv'), index=False)
+    df_totales = pd.DataFrame(reembolsos_totales).drop_duplicates(subset=['Ticket', 'Monto'])
+    df_totales.to_csv(os.path.join(PATH_BASE, 'Auditoria_Principal_TOTALES.csv'), index=False)
+    print(f"✅ Auditoría Principal recuperada: {len(df_totales)} registros.")
 
-print(f"--- PROCESO FINALIZADO ---")
-print(f"Reporte 1 (Totales): {len(reembolsos_totales)} hallazgos.")
-print(f"Reporte 2 (Infracciones): {len(infracciones_cupon2)} hallazgos.")
+if infracciones_cupon2:
+    df_adic = pd.DataFrame(infracciones_cupon2).drop_duplicates(subset=['Ticket', 'Monto'])
+    df_adic.to_csv(os.path.join(PATH_BASE, 'Auditoria_ADICIONAL_Cupon2.csv'), index=False)
+    print(f"✅ Auditoría Adicional completada: {len(df_adic)} registros.")
+
+print("\n--- PROCESO FINALIZADO CON ÉXITO ---")
