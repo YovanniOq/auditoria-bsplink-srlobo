@@ -1,106 +1,90 @@
-import streamlit as st
-import pandas as pd
-import base64
 import os
+import zipfile
+import pandas as pd
+import re
 
-# 1. Configuración de Marca y Página
-st.set_page_config(page_title="Auditoría Eurekis | Digitalized Finance", layout="wide")
+# CONFIGURACIÓN DE RUTAS
+PATH_BASE = r'C:\Auditoria_Eurekis'
+CARPETAS = ['Data_Ventas_2025', 'Data_Ventas_2026']
 
-# Pintura Personalizada: Colores de Eurekis (Azul #2B57A7 y Cian #1DA6E0)
-st.markdown("""
-    <style>
-    .main { background-color: #f8f9fa; }
-    .titulo-eurekis { color: #2B57A7; font-weight: 800; margin-bottom: 0px; font-size: 42px; }
-    .subtitulo-eurekis { color: #1DA6E0; font-size: 20px; font-weight: 600; margin-top: 0px; }
-    [data-testid="stMetricValue"] { color: #2B57A7 !important; font-weight: bold; }
-    [data-testid="stMetricLabel"] { color: #555555 !important; font-size: 16px; }
-    </style>
-    """, unsafe_allow_html=True)
+def limpiar(txt):
+    return re.sub(r'\D', '', str(txt)).lstrip('0')[-10:]
 
-def get_base64(bin_file):
-    with open(bin_file, 'rb') as f:
-        data = f.read()
-    return base64.b64encode(data).decode()
+def parse_monto(val):
+    if not val or val.strip() == "": return 0.0
+    mapping = {'{':0,'A':1,'B':2,'C':3,'D':4,'E':5,'F':6,'G':7,'H':8,'I':9,'}':0,'J':1,'K':2,'L':3,'M':4,'N':5,'O':6,'P':7,'Q':8,'R':9}
+    val = val.strip()
+    if not val: return 0.0
+    last_char = val[-1]
+    if last_char in mapping:
+        digit = mapping[last_char]
+        sign = -1 if last_char in '}JKLMNOPQR' else 1
+        return sign * (int(val[:-1]) * 10 + digit) / 100.0
+    return float(val) / 100.0 if val.isdigit() else 0.0
 
-# 2. Encabezado Simétrico (Logo Centrado y Colores)
-col1, col2 = st.columns([1, 4])
+print("--- INICIANDO MOTOR DE AUDITORÍA INTEGRAL (SR LOBO) ---")
 
-with col1:
-    # Bajamos el logo para centrarlo con las dos líneas de texto
-    st.markdown("<div style='padding-top: 35px;'>", unsafe_allow_html=True)
-    logo_file = "Logo.png"
-    if os.path.exists(logo_file):
-        encoded_logo = get_base64(logo_file)
-        st.markdown(f'<img src="data:image/png;base64,{encoded_logo}" width="200">', unsafe_allow_html=True)
-    else:
-        st.image("https://raw.githubusercontent.com/YovanniOq/auditoria-bsplink-srlobo/main/Logo.png", width=200)
-    st.markdown("</div>", unsafe_allow_html=True)
+reembolsos_totales = []
+infracciones_cupon2 = []
 
-with col2:
-    st.markdown("<h1 class='titulo-eurekis'>Auditoría de Reembolsos</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='subtitulo-eurekis'>Eurekis Digitalized Finance & Big Data | Proyecto World2fly</p>", unsafe_allow_html=True)
-
-st.divider()
-
-# 3. Motor de Carga Histórica
-@st.cache_data
-def cargar_datos_nube():
-    url_ventas = "https://raw.githubusercontent.com/YovanniOq/auditoria-bsplink-srlobo/main/ventas.xlsx"
-    try:
-        data = pd.read_excel(url_ventas)
-        data.columns = [str(c).strip().upper() for c in data.columns]
-        if 'FECHA VENTA' in data.columns:
-            data['FECHA VENTA'] = pd.to_datetime(data['FECHA VENTA'], errors='coerce')
-            data['MES_NOMBRE'] = data['FECHA VENTA'].dt.month_name()
-        return data
-    except:
-        return None
-
-df_raw = cargar_datos_nube()
-
-if df_raw is not None:
-    # Filtros laterales
-    st.sidebar.markdown("<h2 style='color:#2B57A7;'>Filtros Globales</h2>", unsafe_allow_html=True)
-    meses_disponibles = df_raw['MES_NOMBRE'].dropna().unique().tolist()
-    filtro_mes = st.sidebar.multiselect("Seleccionar Período:", options=meses_disponibles, default=meses_disponibles)
+for carpeta in CARPETAS:
+    ruta_full = os.path.join(PATH_BASE, carpeta)
+    if not os.path.exists(ruta_full): continue
     
-    df = df_raw[df_raw['MES_NOMBRE'].isin(filtro_mes)].copy()
+    for root, _, files in os.walk(ruta_full):
+        for file in files:
+            if file.lower().endswith('.zip'):
+                with zipfile.ZipFile(os.path.join(root, file), 'r') as z:
+                    for name in z.namelist():
+                        with z.open(name) as f:
+                            lines = f.read().decode('latin-1', errors='ignore').splitlines()
+                            
+                            tkt_info = {}
+                            tkt_cpns = {}
 
-    # Motor de Auditoría
-    TKT, L8, TOTAL = 'DOCUMENT_NUMBER', 'TASA L8', 'TOTAL'
-    F_VUE, F_VTA = 'MARKETING_FLIGHT_DEPARTURE_DATE', 'FECHA VENTA'
-    
-    df[F_VUE] = pd.to_datetime(df[F_VUE], errors='coerce')
-    df[TOTAL] = pd.to_numeric(df[TOTAL], errors='coerce').fillna(0)
-    df[L8] = pd.to_numeric(df[L8], errors='coerce').fillna(0)
+                            for l in lines:
+                                if l.startswith('BKS') and 'RFND' in l:
+                                    t = limpiar(l[24:37])
+                                    r = limpiar(l[44:58])
+                                    tkt_info[t] = {
+                                        'RTDN': r,
+                                        'Agencia': l[37:44].strip(),
+                                        'Monto': parse_monto(l[50:61]),
+                                        'Fecha': l[11:17],
+                                        'Archivo': file
+                                    }
+                                    tkt_cpns[t] = set()
 
-    def auditar(fila):
-        if (fila[F_VTA] > fila[F_VUE]) and abs(fila[TOTAL]) > 100:
-            return abs(fila[TOTAL]), "Penalidad No-Show"
-        elif abs(fila[L8]) > 0:
-            return abs(fila[L8]), "Diferencia Tasa L8"
-        return 0, None
+                                if l.startswith('BAR'):
+                                    tb = limpiar(l[24:37])
+                                    cp = l[37:38].strip()
+                                    if tb in tkt_cpns and cp.isdigit():
+                                        tkt_cpns[tb].add(int(cp))
 
-    df[['MONTO_ADM', 'MOTIVO']] = df.apply(lambda x: pd.Series(auditar(x)), axis=1)
-    df_adms = df[df['MONTO_ADM'] > 0].copy()
+                            for tk, cn in tkt_cpns.items():
+                                info = tkt_info[tk]
+                                
+                                # CASO 1: Reembolso Total (Para ver errores de Tasa L8/Penalidad)
+                                if cn == {1, 2, 3, 4} or (info['RTDN'] == tk and len(cn) == 0):
+                                    reembolsos_totales.append({
+                                        'Ticket': tk, 'Agencia': info['Agencia'], 
+                                        'Monto': info['Monto'], 'Fecha': info['Fecha']
+                                    })
+                                
+                                # CASO 2: Infracción Cupón 2 (No reembolsable si Cupón 1 se usó)
+                                elif 1 not in cn and 2 in cn:
+                                    infracciones_cupon2.append({
+                                        'Ticket': tk, 'Agencia': info['Agencia'], 
+                                        'Cupones': sorted(list(cn)), 'Monto_Tarifa_Fuga': info['Monto'],
+                                        'Motivo': 'ADM: Reembolso Cupón 2 con Cupón 1 Volado'
+                                    })
 
-    # Cálculo de KPIs (Corregido)
-    total_auditado = df[TOTAL].abs().sum()
-    total_recuperar = df_adms['MONTO_ADM'].sum()
-    porcentaje = (total_recuperar / total_auditado * 100) if total_auditado > 0 else 0
+# GUARDAR RESULTADOS
+if reembolsos_totales:
+    pd.DataFrame(reembolsos_totales).to_csv(os.path.join(PATH_BASE, '1_Reembolsos_Totales.csv'), index=False)
+if infracciones_cupon2:
+    pd.DataFrame(infracciones_cupon2).to_csv(os.path.join(PATH_BASE, '2_Infracciones_Regla_Tarifa.csv'), index=False)
 
-    # 4. Dashboard Ejecutivo
-    st.markdown(f"<h3 style='color:#2B57A7;'>📊 Reporte Consolidado: <span style='color:#1DA6E0;'>{', '.join(filtro_mes)}</span></h3>", unsafe_allow_html=True)
-    
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Billetes Auditados", len(df))
-    m2.metric("Casos con ADM", len(df_adms))
-    m3.metric("Total a Reclamar", f"{total_recuperar:,.2f} €")
-    m4.metric("% Recuperación", f"{porcentaje:.2f}%")
-
-    st.divider()
-    st.dataframe(df_adms[[TKT, TOTAL, L8, 'MONTO_ADM', 'MOTIVO', 'MES_NOMBRE']], 
-                 use_container_width=True, hide_index=True)
-    
-    csv = df_adms.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Descargar Reporte Eurekis Certificado", data=csv, file_name='Auditoria_Eurekis_W2fly.csv')
+print(f"--- PROCESO FINALIZADO ---")
+print(f"Totales detectados: {len(reembolsos_totales)}")
+print(f"Infracciones Cupón 2 detectadas: {len(infracciones_cupon2)}")
